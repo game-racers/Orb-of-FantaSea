@@ -1,39 +1,43 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using Unity.Burst.CompilerServices;
-using Unity.Collections.LowLevel.Unsafe;
-using Unity.Properties;
 using UnityEngine;
-using UnityEngine.Rendering;
 using UnityEngine.UIElements;
 
 namespace gameracers.Movement
 {
     public class PlayerMover : MonoBehaviour
     {
+        [SerializeField] float speed = .3f;
+
         float gravity = -9.81f;
-        [SerializeField] float airResistance = 1f;
-        [SerializeField] float allBounceStrength = .4f;
-        [SerializeField] float grassFriction = .95f;
-        [SerializeField] float grassBounce = .3f;
-        [SerializeField] float stoneFriction = .98f;
-        [SerializeField] float stoneBounce = .7f;
-        [SerializeField] float ceramicFriction = .98f;
-        [SerializeField] float ceramicBounce = 1f;
+        [SerializeField] float grassFriction = .85f;
+        [SerializeField] float grassBounce = .6f;
+        [SerializeField] float stoneFriction = .90f;
+        [SerializeField] float stoneBounce = .8f;
+        [SerializeField] float ceramicFriction = .95f;
+        [SerializeField] float ceramicBounce = .8f;
+        [SerializeField] float allBounceStrength = .8f;
+        [SerializeField] float rollMult = 1.05f;
+
+        [SerializeField] float bounceMin = .5f;
+
+        [SerializeField] Grounded contactType = Grounded.Air;
+        bool hasCalculatedTouch = false;
+
+        //float downVel = 0;
+        float airTime;
+        float lastBounceVelocity = 0f;
+        float lastBounceYPos = Mathf.Infinity;
 
         Rigidbody rb;
         SphereCollider sc;
 
-        Vector3 velocity = Vector3.zero;
+        Vector3 velocity;
+
         [SerializeField] LayerMask groundMask;
-        float airTime;
-        float lastBounceVelocity = 0f;
-        float lastBounceYPos = Mathf.Infinity;
-        Grounded contactType = Grounded.Air;
 
         List<Vector3> movePoints = new List<Vector3>();
-        List<float> moveValues = new List<float>();
 
         void Start()
         {
@@ -41,275 +45,266 @@ namespace gameracers.Movement
             sc = GetComponent<SphereCollider>();
         }
 
-        void FixedUpdate()
+        private void FixedUpdate()
         {
             if (movePoints.Count > 0)
             {
                 transform.position = movePoints[movePoints.Count - 1];
             }
 
+            hasCalculatedTouch = false;
             movePoints.Clear();
-            moveValues.Clear();
+            CalculateGravity();
 
-            CheckGravity();
-            //CalculateRoll();
-            CheckCollision();
-        }
-
-        private void Update()
-        {
-            
-        }
-
-        public void Strike(float power, Vector3 facing)
-        {
-            velocity = facing * power;
-        }
-
-        private void CheckCollision()
-        {
-            if (velocity.magnitude < .05f) return;
-
-            float remainingPower = TestCollision(velocity.magnitude * Time.fixedDeltaTime);
+            float remainingPower = CheckCollision(velocity.magnitude * Time.fixedDeltaTime);
             int loopProtection = 0;
-
-            while (remainingPower >= .05f && loopProtection < 10)
+            while (remainingPower > 0 && loopProtection < 10)
             {
-                remainingPower = TestCollision(remainingPower);
-                //loopProtection += 1;
+                remainingPower = CheckCollision(remainingPower);
+                loopProtection += 1;
             }
         }
 
-        private float TestCollision(float remainingPower)
+        public void Strike(float power, Vector3 moveDir)
         {
-            if (remainingPower < .05f) return 0;
+            velocity = moveDir * speed * power;
+        }
 
-            // referencePoint is where the ball is/will be at the time of the this TestCollision
-            Vector3 referencePoint = transform.position;
+        private void CalculateGravity()
+        {
+            if (contactType == Grounded.Air)
+            {
+                velocity += Vector3.up * gravity * (Time.time - airTime);
+                return;
+            }
+        }
+
+        private float CheckCollision(float remainingPower)
+        {
+            Vector3 closestPoint, surfaceNormal;
+
+            Vector3 referencePos = transform.position;
             if (movePoints.Count > 0)
-                referencePoint = movePoints[^1];
+            {
+                referencePos = movePoints[^1];
+            }
 
-            float trueDist = 0; // dist from balls last position to collision point, will be appended to moveValues;
-            Vector3 collisionPoint = Vector3.zero;
+            if (remainingPower < .05f)
+            {
+                //TODO insert roll check
+                Collider[] rollCheckColl = Physics.OverlapSphere(referencePos, sc.radius + 0.1f, groundMask);
+                rollCheckColl.Reverse();
+                foreach (Collider coll in rollCheckColl)
+                {
+                    if (GameObject.ReferenceEquals(coll.gameObject, this.gameObject))
+                        continue;
 
-            Vector3 closestPoint;
-            Vector3 surfaceNormal;
+                    if (CheckSphereExtra(coll, sc, referencePos, out closestPoint, out surfaceNormal))
+                    {
+                        Debug.Log("slowly stop roll");
+                        return CalculateRoll(remainingPower, closestPoint, surfaceNormal);
+                    }
+                }
 
-                // Raycast towards direction of velocity
-                RaycastHit[] hits = Physics.SphereCastAll(referencePoint, sc.radius, velocity.normalized, remainingPower);
+                return 0f;
+            }
 
+            RaycastHit[] hits = Physics.SphereCastAll(referencePos, sc.radius, velocity.normalized, remainingPower, groundMask);
+            hits.Reverse();
+            float newPower = remainingPower;
+
+            // check raycast out, test for correct hits, test for ground (right below player) 
             foreach (RaycastHit hit in hits)
             {
                 if (GameObject.ReferenceEquals(this.gameObject, hit.collider.gameObject))
                     continue;
 
-                // test if raycast is behind the ball
-                if (CheckSphereExtra(hit.collider, sc, out closestPoint, out surfaceNormal))
+                if (CheckSphereExtra(hit.collider, sc, hit.point, out closestPoint, out surfaceNormal) || (hit.point == Vector3.zero && CheckSphereExtra(hit.collider, sc, referencePos, out closestPoint, out surfaceNormal)))
                 {
-                    continue;
-                }
-
-                // test raycasthit
-                if ((groundMask & (1 << hit.collider.gameObject.layer)) != 0)
-                {
-                    Debug.Log("Bounce");
-
-                    Vector3 localTravel = hit.collider.ClosestPoint(referencePoint) - referencePoint;
-
-                    if (CheckSphereExtra(hit.collider, sc, out closestPoint, out surfaceNormal))
+                    // Test for if ball is already moving away from the surface
+                    if (Vector3.Angle(velocity, surfaceNormal) < 90f)
                     {
-                        localTravel = closestPoint - referencePoint;
-                    }
-
-                    collisionPoint = referencePoint + localTravel.normalized * (localTravel.magnitude - sc.radius); // world position of the ball at point of impact. 
-
-                    float angle = Vector3.Angle(velocity, (referencePoint - closestPoint).normalized);
-                    if (angle < 90 || Mathf.Approximately(angle, 90))
-                    {
-                        Debug.Log("Vel.Norm: " + velocity.normalized + " floor: " + (referencePoint - closestPoint).normalized + " angle: " + angle);
                         continue;
                     }
-                    else
+                    // Check collision layer to set contactType
+                    SetGroundType(hit.collider.gameObject.layer);
+
+                    // Add point of collision to MovePoints
+                    Vector3 collidePointCenter = closestPoint + surfaceNormal * sc.radius;
+                    newPower = remainingPower - (collidePointCenter - referencePos).magnitude;
+                    movePoints.Add(collidePointCenter);
+
+                    // Calculate bounce from surface normal using trigonometry to then check for either bounce or roll
+                    velocity = Vector3.Reflect(velocity, surfaceNormal.normalized);
+
+                    if ((velocity.magnitude * Mathf.Cos(Vector3.Angle(surfaceNormal, velocity.normalized) * Mathf.PI / 180f) / velocity.magnitude) >= bounceMin)
                     {
-                        // limit velocity based off of last velocity and last y value of bounce
+                        #region Bounce Calculations
+                        // calculate velocity after bounce
+                        if (hasCalculatedTouch == false)
+                        {
+                            switch (contactType)
+                            {
+                                case Grounded.Grass:
+                                    velocity *= grassBounce;
+                                    newPower *= grassBounce;
+                                    lastBounceVelocity *= grassBounce;
+                                    break;
+                                case Grounded.Stone:
+                                    velocity *= stoneBounce;
+                                    newPower *= stoneBounce;
+                                    lastBounceVelocity *= stoneBounce;
+                                    break;
+                                case Grounded.Ceramic:
+                                    velocity *= ceramicBounce;
+                                    newPower *= ceramicBounce;
+                                    lastBounceVelocity *= ceramicBounce;
+                                    break;
+                            }
+                            hasCalculatedTouch = true;
+                        }
+
+                        // Bounce strength limiter
+                        // First bounce of many
+
                         float tempVel = velocity.magnitude;
 
-                        velocity = Vector3.Reflect(velocity, (referencePoint - closestPoint).normalized);
-
-                        //TODO Calculate new velocity
-                        // if current yPos is greater than lastYPos, the resulting velocity's magnitude will be less, otherwise, process it as regular
-                        if (lastBounceVelocity != 0f && collisionPoint.y >= lastBounceYPos)
+                        if (lastBounceVelocity == 0)
                         {
-                            velocity = velocity.normalized * (lastBounceVelocity * allBounceStrength);
+                            tempVel = Mathf.Min(tempVel, velocity.magnitude);
+                        }
+                        else // second and rest of bounces
+                        {
+                            // New Bounce Pos is lower than the old bounce pos
+                            if (collidePointCenter.y < lastBounceYPos)
+                            {
+                                lastBounceVelocity = tempVel;
+                                lastBounceYPos = collidePointCenter.y;
+                            }
+
+                            if (collidePointCenter.y > lastBounceYPos)
+                            {
+                                lastBounceYPos = collidePointCenter.y;
+                            }
+
+                            while (tempVel > lastBounceVelocity)
+                            {
+                                tempVel = velocity.magnitude * allBounceStrength;
+                                velocity = velocity.normalized * velocity.magnitude * allBounceStrength;
+                            }
                         }
 
-                        while (lastBounceVelocity != 0 && velocity.magnitude > lastBounceVelocity)
-                        {
-                            velocity = velocity * allBounceStrength;
-                        }
+                        if (lastBounceVelocity == 0)
+                            lastBounceVelocity = tempVel;
+                        lastBounceVelocity = Mathf.Min(tempVel, lastBounceVelocity);
 
-                        lastBounceVelocity = tempVel;
-                        lastBounceYPos = collisionPoint.y;
-                    }
-                    
-                    trueDist = (collisionPoint - referencePoint).magnitude;
-                    if (trueDist == 0)
-                    {
-                        trueDist = localTravel.magnitude;
-                    }
+                        lastBounceYPos = collidePointCenter.y;
 
-                    // Test for ground type to calculate end velocity.
-                    switch (contactType)
-                    {
-                        case Grounded.Grass:
-                            //velocity = velocity * (1 - grassBounce + (1 - (angle - 90) / 90) * grassBounce);
-                            velocity *= grassBounce;
-                            remainingPower = remainingPower * grassBounce;
-                            break;
-                        case Grounded.Stone:
-                            //velocity = velocity * (1 - stoneBounce + (1 - (angle - 90) / 90) * stoneBounce);
-                            velocity *= stoneBounce;
-                            remainingPower = remainingPower * stoneBounce;
-                            break;
-                        case Grounded.Ceramic:
-                            //velocity = velocity * (1 - ceramicBounce + (1 - (angle - 90) / 90) * ceramicBounce);
-                            velocity *= ceramicBounce;
-                            remainingPower = remainingPower * ceramicBounce;
-                            break;
-                    }
-
-                    if (velocity.y <= .3f)
-                    {
-                        velocity = new Vector3(velocity.x, 0f, velocity.z);
-                        lastBounceVelocity = 0;
-                        lastBounceYPos = Mathf.Infinity;
-
-                        Debug.Log("stop bounce");
-                    }
-
-                    while (lastBounceVelocity != 0 && velocity.magnitude > lastBounceVelocity)
-                    {
-                        velocity = velocity * allBounceStrength;
-                    }
-
-                    movePoints.Add(collisionPoint);
-                    moveValues.Add(trueDist);
-                    return remainingPower - trueDist;
-                }
-            }
-
-            // no real collisions
-
-            movePoints.Add(referencePoint + velocity.normalized * remainingPower);
-            moveValues.Add(remainingPower);
-            return 0;   
-        }
-
-        private void CheckGravity()
-        {
-            // TODO overlap sphere to then calculate potential collision between t his ball and others. figure this shit out later, probably after making the demo level for friends. 
-
-            // is it best to just use velocity as raycast dir? i think so...
-
-            RaycastHit[] hits = Physics.SphereCastAll(transform.position, sc.radius, Vector3.down, -gravity * Time.fixedDeltaTime, groundMask);
-
-            // within this radius to touch
-            Vector3 collisionVector = Vector3.up * (velocity.magnitude * Time.fixedDeltaTime + sc.radius);
-            if (hits.Length == 0)
-            {
-                CalculateGravity();
-                return;
-            }
-
-            foreach (RaycastHit hit in hits)
-            {
-                if (GameObject.ReferenceEquals(this.gameObject, hit.collider.gameObject)) continue;
-
-                Vector3 closestPoint;
-                Vector3 surfaceNormal;
-                if (CheckSphereExtra(hit.collider, sc, out closestPoint, out surfaceNormal))
-                {
-                    collisionVector = transform.position - closestPoint;
-                    airTime = Time.time;
-
-                    if (hit.collider.gameObject.layer == LayerMask.NameToLayer("Grass"))
-                    {
-                        contactType = Grounded.Grass;
-                    }
-                    else if (hit.collider.gameObject.layer == LayerMask.GetMask("Stone"))
-                    {
-                        contactType = Grounded.Stone;
+                        // Now recall the function by returning newPower
+                        return newPower;
+                        #endregion
                     }
                     else
                     {
-                        contactType = Grounded.Ceramic;
+                        Debug.Log("Rolling faster roll");
+                        velocity = Vector3.ProjectOnPlane(velocity, surfaceNormal);
+                        return CalculateRoll(remainingPower, closestPoint, surfaceNormal);
                     }
                 }
             }
 
-            if (collisionVector == Vector3.up * (velocity.magnitude * Time.fixedDeltaTime + sc.radius))
+            // NO VALID COLLISIONS OR NOTHING, AIRBALL!
+            if (contactType != Grounded.Air)
             {
-                CalculateGravity();
-                return;
+                airTime = Time.time;
+                contactType = Grounded.Air;
             }
-
-            // moving too slow and friction stops the ball
-            if (velocity.magnitude < .01f && Vector3.Angle(Vector3.down, collisionVector.normalized) > 178f)
-            {
-                Debug.Log("Should not doo this that frequently, only when stopping");
-                velocity = Vector3.zero;
-                return;
-            }
-
-            if (Vector3.Angle(collisionVector.normalized, Vector3.up) > 5)
-            {
-                velocity = velocity + collisionVector.normalized * Time.fixedDeltaTime * -gravity + Vector3.down * Time.fixedDeltaTime * -gravity;
-            }
-
-            switch (contactType)
-            {
-                case Grounded.Grass:
-                    velocity *= grassFriction;
-                    break;
-                case Grounded.Stone:
-                    velocity *= stoneFriction;
-                    break;
-                case Grounded.Ceramic:
-                    velocity *= ceramicFriction;
-                    break;
-            }
-            velocity *= airResistance;
-            return;
+            movePoints.Add(TestPos(remainingPower, referencePos + velocity.normalized * remainingPower));
+            return 0f;
         }
 
-        private void CalculateGravity()
+        private float CalculateRoll(float remainingPower, Vector3 closestPoint, Vector3 surfaceNormal)
         {
-            if (Time.time - airTime > 0)
+            float newPower = remainingPower;
+
+            Vector3 referencePos = transform.position;
+            if (movePoints.Count >= 1)
+                referencePos = movePoints[^1];
+            Vector3 roughFinalPos = referencePos + velocity.normalized * newPower;
+
+            if (hasCalculatedTouch == false && Vector3.Angle(Vector3.up, surfaceNormal) < 5f)
             {
-                velocity = velocity + (Vector3.up * gravity * (Time.time - airTime));
-            }
-        }
-
-        private void CalculateRoll()
-        {
-            // is grounded and check for slope
-            RaycastHit[] hits = Physics.SphereCastAll(transform.position, sc.radius, Vector3.down, -gravity * Time.fixedDeltaTime);
-
-            foreach (RaycastHit hit in hits)
-            {
-                if (GameObject.ReferenceEquals(hit.collider.gameObject, this.gameObject)) continue;
-
-                Vector3 closestPoint;
-                Vector3 surfaceNormal;
-                if (CheckSphereExtra(hit.collider, sc, out closestPoint, out surfaceNormal))
+                Debug.Log("Shouldnt see this on an incline");
+                switch (contactType)
                 {
-                    Vector3 groundNormal = (transform.position - closestPoint).normalized * -gravity * Time.fixedDeltaTime;
-
-                    if (Vector3.Angle(groundNormal.normalized, Vector3.up) > 5f)
-                    {
-                        velocity += groundNormal + Vector3.up * gravity;
-                    }
+                    case Grounded.Grass:
+                        velocity *= grassFriction;
+                        newPower *= grassFriction;
+                        break;
+                    case Grounded.Stone:
+                        velocity *= stoneFriction;
+                        newPower *= stoneFriction;
+                        break;
+                    case Grounded.Ceramic:
+                        velocity *= ceramicFriction;
+                        newPower *= ceramicFriction;
+                        break;
                 }
+                hasCalculatedTouch = true;
+            }
+
+            velocity = velocity + Vector3.ProjectOnPlane(Vector3.down * -gravity * Time.fixedDeltaTime * rollMult, surfaceNormal);
+            velocity = Vector3.ProjectOnPlane(velocity, surfaceNormal);
+            roughFinalPos = roughFinalPos + Vector3.ProjectOnPlane(Vector3.down * -gravity * Time.fixedDeltaTime * rollMult, surfaceNormal);
+
+            movePoints.Add(TestPos(newPower, roughFinalPos));
+            return 0f;
+        }
+
+        private Vector3 TestPos(float newPower, Vector3 testPos)
+        {
+            Vector3 closestPoint, surfaceNormal;
+
+            Collider[] colliders = Physics.OverlapSphere(testPos + velocity.normalized * newPower, sc.radius);
+            foreach (Collider coll in colliders)
+            {
+                if (GameObject.ReferenceEquals(coll.gameObject, this.gameObject)) continue;
+
+                if (CheckSphereExtra(coll, sc, testPos + velocity.normalized * newPower, out closestPoint, out surfaceNormal))
+                {
+                    return surfaceNormal.normalized * sc.radius + closestPoint;
+                }
+            }
+
+            // new position is valid and does not need any changes
+            return testPos;
+        }
+
+        private void SetGroundType(int layerNum)
+        {
+            if (layerNum == LayerMask.NameToLayer("Grass"))
+            {
+                //Debug.Log("Grass Layer");
+                airTime = Mathf.Infinity;
+                contactType = Grounded.Grass;
+            }
+            else if (layerNum == LayerMask.GetMask("Stone"))
+            {
+                //Debug.Log("Stone Layer");
+                airTime = Mathf.Infinity;
+                contactType = Grounded.Stone;
+            }
+            else if (layerNum == LayerMask.GetMask("Ceramic"))
+            {
+                //Debug.Log("Ceramic Layer");
+                airTime = Mathf.Infinity;
+                contactType = Grounded.Ceramic;
+            }
+            else
+            {
+                //Debug.Log("Catch Layer");
+                airTime = Mathf.Infinity;
+                contactType = Grounded.Ceramic;
             }
         }
 
@@ -323,16 +318,37 @@ namespace gameracers.Movement
             velocity = Vector3.zero;
         }
 
-        public static bool CheckSphereExtra(Collider target_collider, SphereCollider sphere_collider, out Vector3 closest_point, out Vector3 surface_normal)
+
+        public bool CheckSphereExtra(Collider target_collider, SphereCollider sphere_collider, Vector3 reference_pos, out Vector3 closest_point, out Vector3 surface_normal)
         {
             closest_point = Vector3.zero;
             surface_normal = Vector3.zero;
-            float surface_penetration_depth = 0.2f;
-
-            Vector3 sphere_pos = sphere_collider.transform.position;
-            if (Physics.ComputePenetration(target_collider, target_collider.transform.position, target_collider.transform.rotation, sphere_collider, sphere_pos, Quaternion.identity, out surface_normal, out surface_penetration_depth))
+            float surface_penetration_depth = 0f;
+            Vector3 cast_pos = reference_pos + (velocity.normalized * -sc.radius * .5f);
+            // since this will always be used with a moving sphere, would using a capsule colider be better?
+            if (Physics.ComputePenetration(target_collider, target_collider.transform.position, target_collider.transform.rotation, sphere_collider, cast_pos, Quaternion.identity, out surface_normal, out surface_penetration_depth))
             {
-                closest_point = sphere_pos + (surface_normal * (sphere_collider.radius - surface_penetration_depth));
+                closest_point = cast_pos + (surface_normal * (sphere_collider.radius - surface_penetration_depth));
+
+                surface_normal = -surface_normal;
+                return true;
+            }
+
+            // move cast_pos around and test again
+            cast_pos = reference_pos + Vector3.down * sc.radius * .5f;
+            if (Physics.ComputePenetration(target_collider, target_collider.transform.position, target_collider.transform.rotation, sphere_collider, cast_pos, Quaternion.identity, out surface_normal, out surface_penetration_depth))
+            {
+                closest_point = cast_pos + (surface_normal * (sphere_collider.radius - surface_penetration_depth));
+
+                surface_normal = -surface_normal;
+                return true;
+            }
+
+            // move cast_pos around and test again
+            cast_pos = reference_pos + Vector3.up * sc.radius * .5f;
+            if (Physics.ComputePenetration(target_collider, target_collider.transform.position, target_collider.transform.rotation, sphere_collider, cast_pos, Quaternion.identity, out surface_normal, out surface_penetration_depth))
+            {
+                closest_point = cast_pos + (surface_normal * (sphere_collider.radius - surface_penetration_depth));
 
                 surface_normal = -surface_normal;
                 return true;
@@ -342,11 +358,11 @@ namespace gameracers.Movement
         }
     }
 
-    //public enum Grounded
-    //{
-    //    Air,
-    //    Grass,
-    //    Stone,
-    //    Ceramic
-    //}
+    public enum Grounded
+    {
+        Air,
+        Grass,
+        Stone,
+        Ceramic
+    }
 }

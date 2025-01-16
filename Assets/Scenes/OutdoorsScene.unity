@@ -1083,6 +1083,16 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 1714828475372266083, guid: b1282a2d618e4e047bc617115ad41e89,
+        type: 3}
+      propertyPath: m_IsActive
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 5009547730777370008, guid: b1282a2d618e4e047bc617115ad41e89,
+        type: 3}
+      propertyPath: m_FillAmount
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 5220895219307694053, guid: b1282a2d618e4e047bc617115ad41e89,
         type: 3}
       propertyPath: m_Pivot.x
@@ -1319,15 +1329,65 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 2580635761578102906, guid: a3cc40cbd2c7e574a951b70fb2b4f75b,
+        type: 3}
+      propertyPath: m_Material
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 3730911730229518531, guid: a3cc40cbd2c7e574a951b70fb2b4f75b,
+        type: 3}
+      propertyPath: m_Name
+      value: Player Model
+      objectReference: {fileID: 0}
     - target: {fileID: 5008413948396407493, guid: a3cc40cbd2c7e574a951b70fb2b4f75b,
         type: 3}
       propertyPath: m_Sources.Array.data[0].sourceTransform
       value: 
       objectReference: {fileID: 272149771}
+    - target: {fileID: 5538006649888096660, guid: a3cc40cbd2c7e574a951b70fb2b4f75b,
+        type: 3}
+      propertyPath: m_Drag
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5538006649888096660, guid: a3cc40cbd2c7e574a951b70fb2b4f75b,
+        type: 3}
+      propertyPath: m_AngularDrag
+      value: 0.05
+      objectReference: {fileID: 0}
+    - target: {fileID: 5538006649888096660, guid: a3cc40cbd2c7e574a951b70fb2b4f75b,
+        type: 3}
+      propertyPath: m_Constraints
+      value: 112
+      objectReference: {fileID: 0}
+    - target: {fileID: 5538006649888096660, guid: a3cc40cbd2c7e574a951b70fb2b4f75b,
+        type: 3}
+      propertyPath: m_CollisionDetection
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 6199258526340099371, guid: a3cc40cbd2c7e574a951b70fb2b4f75b,
         type: 3}
       propertyPath: m_Name
       value: Player
+      objectReference: {fileID: 0}
+    - target: {fileID: 6888489772582630238, guid: a3cc40cbd2c7e574a951b70fb2b4f75b,
+        type: 3}
+      propertyPath: speed
+      value: 10
+      objectReference: {fileID: 0}
+    - target: {fileID: 6888489772582630238, guid: a3cc40cbd2c7e574a951b70fb2b4f75b,
+        type: 3}
+      propertyPath: rollMult
+      value: 1.1
+      objectReference: {fileID: 0}
+    - target: {fileID: 6888489772582630238, guid: a3cc40cbd2c7e574a951b70fb2b4f75b,
+        type: 3}
+      propertyPath: bounceMin
+      value: 0.1
+      objectReference: {fileID: 0}
+    - target: {fileID: 6888489772582630238, guid: a3cc40cbd2c7e574a951b70fb2b4f75b,
+        type: 3}
+      propertyPath: grassFriction
+      value: 0.95
       objectReference: {fileID: 0}
     - target: {fileID: 8912962835573612789, guid: a3cc40cbd2c7e574a951b70fb2b4f75b,
         type: 3}

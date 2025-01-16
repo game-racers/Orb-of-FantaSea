@@ -32,6 +32,7 @@ namespace gameracers.Control
             powerBar = powerBG.transform.GetChild(0).GetComponent<Image>();
             mover = GetComponent<PlayerMover>();
             facing = transform.Find("Facing");
+
             foreach (Transform child in transform)
             {
                 if (child.GetComponent<Equipment>() != null)
